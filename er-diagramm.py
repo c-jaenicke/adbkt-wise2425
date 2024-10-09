@@ -53,7 +53,7 @@ def build_entity_entry(table_name, df_table, df_keys):
 
     for index, row in df_table.iterrows():
         if index != 0:
-            entity_string += ("\t\t\n--")
+            entity_string += ("\n\t\t--")
 
         name = row['column_name']
 
@@ -66,22 +66,27 @@ def build_entity_entry(table_name, df_table, df_keys):
         for index, row in df_keys.iterrows():
             if row['column_name'] == name:
                 if row['contype'] == 'f':
-                    entity_string += "FOREIGN KEY"
+                    entity_string += "FK "
 
                 if row['contype'] == 'p':
-                    entity_string += "PRIMARY KEY"
-
-        # row_keys = df_keys.loc[df_keys['column_name'] == name]['contype']
-        # if not row_keys.empty:
-        #    print(row_keys)
-        #    if row_keys == 'f':
-        #       entity_string += "FOREIGN KEY"
-
-        # if row_keys.get('contype') == 'p':
-        #    entity_string += "PRIMARY KEY"
+                    entity_string += "PK "
 
     entity_string += "\n\t}"
     return entity_string
+
+
+def build_entity_relation(df_keys):
+    relation_string = "\n"
+
+    df_primary = df_keys.loc[df_keys['contype'] == 'p']
+    df_foreign = df_keys.loc[df_keys['contype'] == 'f']
+
+    for index, row in df_foreign.iterrows():
+        for index2, row2 in df_primary.iterrows():
+            if row['column_name'] == row2['column_name']:
+                relation_string += f"\n\t\t{row2['tablename']}||--|{{{row['tablename']}"
+
+    return relation_string
 
 
 def er_diagram(schema):
@@ -90,23 +95,35 @@ def er_diagram(schema):
     with engine.connect() as con:
         sql = f"SELECT tablename FROM pg_tables WHERE schemaname = '{schema}' ORDER BY tablename"
         df = pd.read_sql_query(text(sql), con)
-        # print(df)
 
         for table in df.tablename.values:
             sql_table = f"SELECT * FROM information_schema.columns WHERE table_schema = '{schema}' AND table_name = '{table}'"
-            sql_keys = f"""
-            SELECT constraint_name, table_name, column_name, contype
-FROM information_schema.key_column_usage
-         INNER JOIN pg_constraint ON information_schema.key_column_usage.constraint_name = conname
-WHERE (table_name = '{table}')
-  AND (contype = 'p'
-    OR contype = 'f')
-"""
-            # AND NOT column_name = 'ulid';
             df_table = pd.read_sql_query(sql_table, con)
+
+            sql_keys = f"""
+                SELECT constraint_name, table_name, column_name, contype
+                FROM information_schema.key_column_usage
+                INNER JOIN pg_constraint ON information_schema.key_column_usage.constraint_name = conname
+                WHERE (table_name = '{table}')
+                    AND (contype = 'p'
+                    OR contype = 'f')
+                """
+            # AND NOT column_name = 'ulid';
             df_keys = pd.read_sql_query(sql_keys, con)
+
             result_string += build_entity_entry(table, df_table, df_keys)
 
+        sql_keys = f"""
+            SELECT pgt.tablename, iskcu.constraint_name, iskcu.column_name, pgc.contype
+            FROM pg_tables pgt
+                INNER JOIN information_schema.key_column_usage iskcu ON pgt.tablename=iskcu.table_name
+                INNER JOIN pg_constraint pgc ON iskcu.constraint_name = conname
+            WHERE schemaname = '{schema}'
+            """
+        # AND NOT column_name = 'ulid';
+        df_keys2 = pd.read_sql_query(sql_keys, con)
+
+        result_string += build_entity_relation(df_keys2)
         result_string += emit_end()
         return result_string
 

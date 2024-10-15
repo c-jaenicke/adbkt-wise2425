@@ -72,6 +72,7 @@ def build_entity_entry(table_name, df_table, df_keys):
                     entity_string += "PK "
 
     entity_string += "\n\t}"
+
     return entity_string
 
 
@@ -84,7 +85,7 @@ def build_entity_relation(df_keys):
     for index, row in df_foreign.iterrows():
         for index2, row2 in df_primary.iterrows():
             if row['column_name'] == row2['column_name']:
-                relation_string += f"\n\t\t{row2['tablename']}||--|{{{row['tablename']}"
+                relation_string += f"\n\t\t{row2['tablename']}||--o{{{row['tablename']}"
 
     return relation_string
 
@@ -95,6 +96,9 @@ def er_diagram(schema):
     with engine.connect() as con:
         sql = f"SELECT tablename FROM pg_tables WHERE schemaname = '{schema}' ORDER BY tablename"
         df = pd.read_sql_query(text(sql), con)
+
+        # relation_set = set()
+        relation_set = []
 
         for table in df.tablename.values:
             sql_table = f"SELECT * FROM information_schema.columns WHERE table_schema = '{schema}' AND table_name = '{table}'"
@@ -111,6 +115,30 @@ def er_diagram(schema):
             # AND NOT column_name = 'ulid';
             df_keys = pd.read_sql_query(sql_keys, con)
 
+            sql_key_relations = f"""
+SELECT
+    con.conname AS constraint_name,
+    conrel.relname AS table_name,
+    att2.attname AS column_name,
+    confrel.relname AS referenced_table,
+    att.attname AS referenced_column
+FROM
+    pg_constraint con
+    INNER JOIN pg_class conrel ON con.conrelid = conrel.oid
+    INNER JOIN pg_namespace nsp ON conrel.relnamespace = nsp.oid
+    INNER JOIN pg_attribute att2 ON att2.attnum = ANY (con.conkey) AND att2.attrelid = conrel.oid
+    INNER JOIN pg_class confrel ON con.confrelid = confrel.oid
+    INNER JOIN pg_attribute att ON att.attnum = ANY (con.confkey) AND att.attrelid = confrel.oid
+WHERE
+    con.contype = 'f'
+    AND nsp.nspname = '{schema}'
+    AND conrel.relname = '{table}';
+"""
+            df_key_relations = pd.read_sql_query(sql_key_relations, con)
+
+            for index, row in df_key_relations.iterrows():
+                relation_set.append(f"\n\t{row['table_name']}||--o{{{row['referenced_table']}")
+
             result_string += build_entity_entry(table, df_table, df_keys)
 
         sql_keys = f"""
@@ -123,7 +151,10 @@ def er_diagram(schema):
         # AND NOT column_name = 'ulid';
         df_keys2 = pd.read_sql_query(sql_keys, con)
 
-        result_string += build_entity_relation(df_keys2)
+        # result_string += build_entity_relation(df_keys2)
+        for item in relation_set:
+            result_string += f"\n\t{item}"
+
         result_string += emit_end()
         return result_string
 

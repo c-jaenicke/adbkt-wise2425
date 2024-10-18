@@ -14,10 +14,11 @@ matplotlib
 neo4j
 numpy
 oracledb 
-pandas
+pandas~=2.2.3
 psycopg[binary,pool]
 pyarrow
 pymongo
-redis
+redis~=5.1.1
 seaborn
-sqlalchemy
+sqlalchemy~=2.0.35
+mariadb
